@@ -1,39 +1,70 @@
 # blogtutorial
 
-This template should help get you started developing with Vue 3 in Vite.
 
-## Recommended IDE Setup
+```hs
+-- Roles
+DEFINE TABLE roles SCHEMAFULL
+    PERMISSIONS
+        FOR SELECT FULL
+        FOR CREATE, UPDATE, DELETE NONE;
 
-[VSCode](https://code.visualstudio.com/) + [Volar](https://marketplace.visualstudio.com/items?itemName=Vue.volar) (and disable Vetur).
+DEFINE FIELD name ON roles TYPE string;
 
-## Type Support for `.vue` Imports in TS
+CREATE roles:admin SET name = 'Admin';
+CREATE roles:user SET name = 'User';
 
-TypeScript cannot handle type information for `.vue` imports by default, so we replace the `tsc` CLI with `vue-tsc` for type checking. In editors, we need [Volar](https://marketplace.visualstudio.com/items?itemName=Vue.volar) to make the TypeScript language service aware of `.vue` types.
+-- Users
+DEFINE TABLE Users SCHEMAFULL
+	PERMISSIONS
+		FOR select FULL
+		FOR create WHERE roles:admin INSIDE $auth.roles
+		FOR update, delete
+			WHERE id = $auth.id OR roles:admin INSIDE $auth.roles
+;
+DEFINE FIELD username ON Users TYPE string;
+DEFINE FIELD email ON Users TYPE string ASSERT string::is::email($value);
+DEFINE FIELD password ON Users TYPE string;
+DEFINE FIELD roles ON Users TYPE array<record<roles>> DEFAULT [roles:user];
 
-## Customize configuration
+DEFINE INDEX userEmailIndex ON Users FIELDS email UNIQUE;
+DEFINE INDEX userUsernameIndex ON Users FIELDS username UNIQUE;
 
-See [Vite Configuration Reference](https://vite.dev/config/).
+-- Auth
+DEFINE ACCESS Auth ON DATABASE TYPE RECORD
+    SIGNUP (
+        CREATE Users SET
+            username = $username,
+            email = $email,
+            password = crypto::argon2::generate($password)
+    )
 
-## Project Setup
+    SIGNIN (
+        SELECT * FROM Users WHERE
+            email = $email AND 
+            crypto::argon2::compare(password, $password)
+    )
 
-```sh
-pnpm install
-```
+    DURATION FOR TOKEN 3d,
+    FOR SESSION 3d;
 
-### Compile and Hot-Reload for Development
+-- Posts
+DEFINE TABLE OVERWRITE Posts SCHEMAFULL
+    PERMISSIONS
+        FOR select
+            WHERE published = true
+            OR user = $auth.id
+            OR roles:admin INSIDE $auth.roles
+        FOR create, update, delete
+            WHERE 
+            user = $auth.id
+            OR roles:admin INSIDE $auth.roles
+;
 
-```sh
-pnpm dev
-```
-
-### Type-Check, Compile and Minify for Production
-
-```sh
-pnpm build
-```
-
-### Lint with [ESLint](https://eslint.org/)
-
-```sh
-pnpm lint
+DEFINE FIELD title ON TABLE Posts TYPE string;
+DEFINE FIELD description ON TABLE Posts TYPE string;
+DEFINE FIELD content ON TABLE Posts TYPE string;
+DEFINE FIELD published ON TABLE Posts TYPE bool DEFAULT false;
+DEFINE FIELD created_at ON TABLE Posts TYPE datetime DEFAULT time::now();
+DEFINE FIELD updated_at ON TABLE Posts TYPE datetime DEFAULT time::now() VALUE time::now();
+DEFINE FIELD user ON TABLE Posts TYPE record<Users> DEFAULT $auth.id;
 ```
